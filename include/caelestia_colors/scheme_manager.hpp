@@ -6,7 +6,7 @@ namespace fs = std::filesystem;
 
 struct SchemeManager
 {
-    // SchemeManager() {}
+    SchemeManager() = delete;
 
     /**
      * Applies a scheme as Caelestia's active scheme.
@@ -34,7 +34,7 @@ struct SchemeManager
         if (!temporary_created)
         {
             throw std::runtime_error("Applying scheme failed");
-            // we didn't change the original file, so the rollback isn't a thing here
+            // original file wasn't , so the rollback isn't a thing here
         }
 
         // making sure current scheme is saved and possible to recover
