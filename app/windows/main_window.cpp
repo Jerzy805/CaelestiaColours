@@ -1,4 +1,3 @@
-
 #include "windows/main_window.hpp"
 #include "widgets/clickable_frame.hpp"
 
@@ -10,22 +9,19 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QPushButton>
-#include <QVBoxLayout>
-#include <QVector>
-#include <QWidget>
 #include <QScrollArea>
-#include <cstdlib>
+#include <QVBoxLayout>
+#include <QWidget>
+#include <QSignalBlocker>
+
+#include <exception>
+#include <utility>
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 {
     m_scheme_editor = SchemeEditor::from_file(SchemePaths::caelestia_scheme());
-
-    auto updateModifiedState = [this]()
-    {
-        m_app_title->setText(m_scheme_editor->is_modified()
-            ? "CaelestiaColours*" : "CaelestiaColours");
-    };
 
     setWindowTitle("CaelestiaColours");
     resize(1280, 800);
@@ -43,7 +39,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     auto* header = new QHBoxLayout;
     header->setSpacing(10);
 
-    m_app_title = new QLabel("CaelestiaColours"); // label title
+    m_app_title = new QLabel("CaelestiaColours");
     m_app_title->setObjectName("appTitle");
 
     auto* subtitle = new QLabel("SCHEME EDITOR");
@@ -64,7 +60,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     header->addStretch();
     header->addWidget(search);
     header->addWidget(newSchemeButton);
-
     rootLayout->addLayout(header);
 
     // Main workspace
@@ -86,16 +81,29 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 
     m_scheme_list = new QListWidget;
     m_scheme_list->setObjectName("schemeList");
-
     populate_scheme_list();
+
+    connect(m_scheme_list, &QListWidget::itemClicked, this,
+            [this](QListWidgetItem* item)
+    {
+        const auto path = fs::path(item->data(Qt::UserRole).toString().toStdString());
+        load_scheme(path);
+    });
 
     auto* saveButton = new QPushButton("Save");
     saveButton->setObjectName("secondaryButton");
 
-    connect(saveButton, &QPushButton::clicked, this, [this, updateModifiedState]
+    connect(saveButton, &QPushButton::clicked, this, [this]
     {
-        m_scheme_editor->save();
-        updateModifiedState();
+        try
+        {
+            m_scheme_editor->save();
+            update_modified_state();
+        }
+        catch (const std::exception& e)
+        {
+            QMessageBox::warning(this, "Failed to save scheme", QString::fromUtf8(e.what()));
+        }
     });
 
     sidebarLayout->addWidget(schemesTitle);
@@ -110,73 +118,22 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     editorLayout->setContentsMargins(22, 20, 22, 22);
     editorLayout->setSpacing(18);
 
-    auto* paletteDescription = new QLabel(
-        "Your colours, organised in one place."
-    );
+    auto* paletteDescription = new QLabel("Your colours, organised in one place.");
     paletteDescription->setObjectName("mutedText");
 
     auto* paletteHeader = new QVBoxLayout;
     paletteHeader->setSpacing(5);
     paletteHeader->addWidget(paletteDescription);
-
     editorLayout->addLayout(paletteHeader);
-    
 
     auto* colorsWidget = new QWidget;
-    auto* colors = new QGridLayout(colorsWidget);
-
-    colors->setSpacing(12);
+    m_colour_grid = new QGridLayout(colorsWidget);
+    m_colour_grid->setSpacing(12);
 
     auto* scrollArea = new QScrollArea;
     scrollArea->setWidget(colorsWidget);
     scrollArea->setWidgetResizable(true);
     scrollArea->setObjectName("colorScrollArea");
-
-    const auto& colourData = m_scheme_editor->get_current().get_colour_data();
-    
-    const auto colourNames = colourData.get_colour_names();
-
-    QVector<ClickableFrame*> colourCards;
-
-    int i = 0;
-
-    for (const auto& colourName : colourNames)
-    {
-        const auto& colour = colourData.get_colour(colourName);
-        const auto name = QString::fromStdString(colourName);
-        const auto hex = "#" + QString::fromStdString(colour.to_hex());
-
-        auto* card = new ClickableFrame(name, hex);
-        card->setObjectName("colorCard");
-        card->setCursor(Qt::PointingHandCursor);
-
-        auto* cardLayout = new QVBoxLayout(card);
-        cardLayout->setContentsMargins(8, 8, 8, 10);
-        cardLayout->setSpacing(8);
-
-        auto* swatch = new QFrame;
-        swatch->setMinimumHeight(76);
-        swatch->setObjectName("colorSwatch");
-
-        swatch->setStyleSheet(QString("background-color: %1;"
-                "border-radius: 9px;").arg(hex));
-
-        auto* nameLabel = new QLabel(name);
-        nameLabel->setObjectName("colorName");
-
-        auto* hexLabel = new QLabel(hex.toUpper());
-        hexLabel->setObjectName("colorHex");
-
-        cardLayout->addWidget(swatch);
-        cardLayout->addWidget(nameLabel);
-        cardLayout->addWidget(hexLabel);
-
-        colors->addWidget(card, i / 4, i % 4);
-        colourCards.append(card);
-
-        ++i;
-    }
-
     editorLayout->addWidget(scrollArea, 1);
 
     // Colour inspector
@@ -194,173 +151,54 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 
     auto* colorPickerButton = new QPushButton("Choose colour...");
     colorPickerButton->setObjectName("secondaryButton");
-
     colorPickerButton->setStyleSheet(
-    "QPushButton {"
-    "  background-color: #313244;"
-    "  color: #cdd6f4;"
-    "  border: 1px solid #45475a;"
-    "  border-radius: 10px;"
-    "  padding: 10px 12px;"
-    "}"
-    "QPushButton:hover {"
-    "  background-color: #45475a;"
-    "  border-color: #cba6f7;"
-    "}"
-    "QPushButton:pressed {"
-    "  background-color: #585b70;"
-    "}");
+        "QPushButton { background-color: #313244; color: #cdd6f4;"
+        " border: 1px solid #45475a; border-radius: 10px; padding: 10px 12px; }"
+        "QPushButton:hover { background-color: #45475a; border-color: #cba6f7; }"
+        "QPushButton:pressed { background-color: #585b70; }");
 
     auto* hexLabel = new QLabel("HEX VALUE");
     hexLabel->setObjectName("sectionTitle");
 
-    auto* selectedColor = new QFrame;
-    selectedColor->setMinimumHeight(110);
+    m_selected_colour = new QFrame;
+    m_selected_colour->setMinimumHeight(110);
 
-    auto* selectedName = new QLabel;
-    selectedName->setObjectName("panelTitle");
+    m_selected_name = new QLabel;
+    m_selected_name->setObjectName("panelTitle");
 
-    auto* hexValue = new QLineEdit;
+    m_hex_value = new QLineEdit;
 
-    auto* info = new QLabel(
-        "Select a colour from the palette to inspect its properties."
-    );
+    auto* info = new QLabel("Select a colour from the palette to inspect its properties.");
     info->setObjectName("mutedText");
     info->setWordWrap(true);
 
     inspectorLayout->addWidget(inspectorTitle);
-    inspectorLayout->addWidget(selectedColor);
-    inspectorLayout->addWidget(selectedName);
+    inspectorLayout->addWidget(m_selected_colour);
+    inspectorLayout->addWidget(m_selected_name);
     inspectorLayout->addWidget(hexLabel);
-    inspectorLayout->addWidget(hexValue);
+    inspectorLayout->addWidget(m_hex_value);
     inspectorLayout->addWidget(colorPickerButton);
     inspectorLayout->addWidget(info);
     inspectorLayout->addStretch();
 
-        // Set the initially selected colour card.
-    m_selectedCard = colourCards.isEmpty() ? nullptr : colourCards.front();
-
-    for (auto* card : colourCards)
+    // Apply the HEX value on Enter or when the input loses focus
+    connect(m_hex_value, &QLineEdit::editingFinished, this, [this]
     {
-        card->setSelected(card == m_selectedCard);
-    }
+        if (!m_selectedCard)
+            return;
 
-    // Update the selected colour across the GUI.
-    auto updateCardColor = [this, selectedName, hexValue, selectedColor, updateModifiedState](
-        ClickableFrame* card, const QString& value)
+        if (!update_card_colour(m_selectedCard, m_hex_value->text().trimmed()))
+            m_hex_value->setText(m_selectedCard->hex());
+    });
+
+    connect(colorPickerButton, &QPushButton::clicked, this, [this]
     {
-        QColor color(value);
+        if (!m_selectedCard)
+            return;
 
-        if (!color.isValid())
-        {
-            return false;
-        }
-
-        const QString normalizedHex = color.name(QColor::HexRgb).toUpper();
-
-        const auto newColour = Colour::from_hex(normalizedHex.toStdString());
-
-        m_scheme_editor->set_colour(card->name().toStdString(), newColour); // colour actually changed but not saved yet
-
-        updateModifiedState();
-
-        card->setHex(normalizedHex);
-
-        if (auto* swatch = card->findChild<QFrame*>("colorSwatch"))
-        {
-            swatch->setStyleSheet(
-                QString(
-                    "background-color: %1;"
-                    "border-radius: 9px;"
-                ).arg(normalizedHex)
-            );
-        }
-
-        if (auto* hexLabel = card->findChild<QLabel*>("colorHex"))
-        {
-            hexLabel->setText(normalizedHex);
-        }
-
-        selectedName->setText(card->name());
-        hexValue->setText(normalizedHex);
-
-        selectedColor->setStyleSheet(
-            QString(
-                "background-color: %1;"
-                "border-radius: 12px;"
-            ).arg(normalizedHex)
-        );
-
-        return true;
-    };
-
-    // Select a colour card and update the inspector.
-    for (auto* card : colourCards)
-    {
-        connect(card, &ClickableFrame::clicked, this,
-            [this, card, colourCards, updateCardColor]
-            {
-                m_selectedCard = card;
-
-                for (auto* otherCard : colourCards)
-                {
-                    otherCard->setSelected(otherCard == card);
-                }
-
-                updateCardColor(card, card->hex());
-            }
-        );
-    }
-
-    // Apply the HEX value when Enter is pressed.
-    connect(hexValue, &QLineEdit::returnPressed, this,
-        [this, hexValue, updateCardColor]
-        {
-            if (m_selectedCard == nullptr)
-            {
-                return;
-            }
-
-            if (!updateCardColor(m_selectedCard, hexValue->text().trimmed()))
-            {
-                hexValue->setText(m_selectedCard->hex());
-            }
-        }
-    );
-
-    // Validate the HEX value when the input loses focus.
-    connect(hexValue, &QLineEdit::editingFinished, this,
-        [this, hexValue, updateCardColor]
-        {
-            if (m_selectedCard == nullptr)
-            {
-                return;
-            }
-
-            if (!updateCardColor(m_selectedCard, hexValue->text().trimmed()))
-            {
-                hexValue->setText(m_selectedCard->hex());
-            }
-        }
-    );
-
-    // Open the colour picker dialog.
-    connect(colorPickerButton, &QPushButton::clicked, this,
-        [this, updateCardColor]
-        {
-            if (m_selectedCard == nullptr)
-            {
-                return;
-            }
-
-            QColorDialog dialog(
-                QColor(m_selectedCard->hex()),
-                this
-            );
-
-            dialog.setWindowTitle("Choose colour");
-            dialog.setOption(QColorDialog::DontUseNativeDialog, true);
-
+        QColorDialog dialog(QColor(m_selectedCard->hex()), this);
+        dialog.setWindowTitle("Choose colour");
+        dialog.setOption(QColorDialog::DontUseNativeDialog, true);
             dialog.setStyleSheet(R"(
                 QColorDialog {
                     background-color: #191b22;
@@ -434,31 +272,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
                 }
             )");
 
-            if (dialog.exec() == QDialog::Accepted)
-            {
-                const QColor chosenColor = dialog.selectedColor();
-
-                if (chosenColor.isValid())
-                {
-                    updateCardColor(
-                        m_selectedCard,
-                        chosenColor.name(QColor::HexRgb)
-                    );
-                }
-            }
+        if (dialog.exec() == QDialog::Accepted)
+        {
+            const QColor chosenColor = dialog.selectedColor();
+            if (chosenColor.isValid())
+                update_card_colour(m_selectedCard, chosenColor.name(QColor::HexRgb));
         }
-    );
-
-    // Synchronize the inspector with the initial selection.
-    if (m_selectedCard != nullptr)
-    {
-        updateCardColor(m_selectedCard, m_selectedCard->hex());
-    }
+    });
 
     workspace->addWidget(sidebar);
     workspace->addWidget(editor, 1);
     workspace->addWidget(inspector);
-
     rootLayout->addLayout(workspace, 1);
 
     // Caelestia-inspired styling
@@ -649,34 +473,205 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
             border-color: #2b2d38;
         }
     )");
+    rebuild_colour_cards();
+    update_modified_state();
+}
+
+void MainWindow::update_modified_state()
+{
+    if (m_app_title && m_scheme_editor)
+        m_app_title->setText(m_scheme_editor->is_modified()
+            ? "CaelestiaColours*" : "CaelestiaColours");
 }
 
 void MainWindow::populate_scheme_list()
 {
     const auto directory = SchemePaths::schemes_directory();
-
-    fs::create_directories(directory);
-
-    m_scheme_list->clear();
-
-    for (const auto& entry : fs::directory_iterator(directory))
+    try
     {
-        if (!entry.is_regular_file() || entry.path().extension() != ".json")
+        fs::create_directories(directory);
+        m_scheme_list->clear();
+
+        for (const auto& entry : fs::directory_iterator(directory))
         {
-            continue;
+            if (!entry.is_regular_file() || entry.path().extension() != ".json")
+                continue;
+
+            const auto path = entry.path();
+            auto* item = new QListWidgetItem(
+                QString::fromStdString(path.stem().string()), m_scheme_list);
+            item->setData(Qt::UserRole, QString::fromStdString(path.string()));
         }
-
-        const auto path = entry.path();
-
-        auto* item = new QListWidgetItem(
-            QString::fromStdString(path.stem().string()),
-            m_scheme_list
-        );
-
-        // store the file path independently of the displayed name
-        item->setData(
-            Qt::UserRole,
-            QString::fromStdString(path.string())
-        );
     }
+    catch (const std::exception& e)
+    {
+        QMessageBox::warning(this, "Failed to list schemes", QString::fromUtf8(e.what()));
+    }
+}
+
+void MainWindow::load_scheme(const fs::path& path)
+{
+    if (m_scheme_editor && m_scheme_editor->is_modified())
+    {
+        const auto answer = QMessageBox::question(
+            this, "Unsaved changes",
+            "Discard unsaved changes and open another scheme?",
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+
+        if (answer != QMessageBox::Yes)
+            return;
+    }
+
+    try
+    {
+        auto editor = SchemeEditor::from_file(path);
+        m_scheme_editor = std::move(editor);
+        rebuild_colour_cards();
+        update_modified_state();
+    }
+    catch (const std::exception& e)
+    {
+        QMessageBox::warning(this, "Failed to load scheme", QString::fromUtf8(e.what()));
+    }
+}
+
+void MainWindow::clear_colour_cards()
+{
+    m_selectedCard = nullptr;
+
+    if (!m_colour_grid)
+        return;
+
+    while (auto* item = m_colour_grid->takeAt(0))
+    {
+        delete item->widget();
+        delete item;
+    }
+
+    m_colour_cards.clear();
+}
+
+void MainWindow::rebuild_colour_cards()
+{
+    clear_colour_cards();
+
+    if (!m_scheme_editor)
+    {
+        update_inspector();
+        return;
+    }
+
+    const auto& colourData = m_scheme_editor->get_current().get_colour_data();
+    const auto colourNames = colourData.get_colour_names();
+
+    int i = 0;
+    for (const auto& colourName : colourNames)
+    {
+        const auto& colour = colourData.get_colour(colourName);
+        const auto name = QString::fromStdString(colourName);
+        const auto hex = "#" + QString::fromStdString(colour.to_hex());
+
+        auto* card = new ClickableFrame(name, hex);
+        card->setObjectName("colorCard");
+        card->setCursor(Qt::PointingHandCursor);
+
+        auto* cardLayout = new QVBoxLayout(card);
+        cardLayout->setContentsMargins(8, 8, 8, 10);
+        cardLayout->setSpacing(8);
+
+        auto* swatch = new QFrame;
+        swatch->setMinimumHeight(76);
+        swatch->setObjectName("colorSwatch");
+        swatch->setStyleSheet(QString(
+            "background-color: %1; border-radius: 9px;").arg(hex));
+
+        auto* nameLabel = new QLabel(name);
+        nameLabel->setObjectName("colorName");
+
+        auto* hexLabel = new QLabel(hex.toUpper());
+        hexLabel->setObjectName("colorHex");
+
+        cardLayout->addWidget(swatch);
+        cardLayout->addWidget(nameLabel);
+        cardLayout->addWidget(hexLabel);
+
+        m_colour_grid->addWidget(card, i / 4, i % 4);
+        m_colour_cards.append(card);
+
+        connect(card, &ClickableFrame::clicked, this, [this, card]
+        {
+            select_colour_card(card);
+        });
+
+        ++i;
+    }
+
+    select_colour_card(m_colour_cards.isEmpty() ? nullptr : m_colour_cards.front());
+}
+
+void MainWindow::select_colour_card(ClickableFrame* card)
+{
+    m_selectedCard = card;
+
+    for (auto* other : m_colour_cards)
+        other->setSelected(other == card);
+
+    update_inspector();
+}
+
+void MainWindow::update_inspector()
+{
+    if (!m_selected_name || !m_hex_value || !m_selected_colour)
+        return;
+
+    if (!m_selectedCard)
+    {
+        m_selected_name->clear();
+        m_hex_value->clear();
+        m_hex_value->setEnabled(false);
+        m_selected_colour->setStyleSheet(QString());
+        return;
+    }
+
+    m_hex_value->setEnabled(true);
+    m_selected_name->setText(m_selectedCard->name());
+    m_hex_value->setText(m_selectedCard->hex().toUpper());
+    m_selected_colour->setStyleSheet(QString(
+        "background-color: %1; border-radius: 12px;").arg(m_selectedCard->hex()));
+}
+
+bool MainWindow::update_card_colour(ClickableFrame* card, const QString& value)
+{
+    if (!card || !m_scheme_editor)
+        return false;
+
+    const QColor color(value);
+    if (!color.isValid())
+        return false;
+
+    const QString normalizedHex = color.name(QColor::HexRgb).toUpper();
+
+    try
+    {
+        const auto newColour = Colour::from_hex(normalizedHex.toStdString());
+        m_scheme_editor->set_colour(card->name().toStdString(), newColour);
+    }
+    catch (const std::exception& e)
+    {
+        QMessageBox::warning(this, "Failed to change colour", QString::fromUtf8(e.what()));
+        return false;
+    }
+
+    card->setHex(normalizedHex);
+
+    if (auto* swatch = card->findChild<QFrame*>("colorSwatch"))
+        swatch->setStyleSheet(QString(
+            "background-color: %1; border-radius: 9px;").arg(normalizedHex));
+
+    if (auto* label = card->findChild<QLabel*>("colorHex"))
+        label->setText(normalizedHex);
+
+    update_inspector();
+    update_modified_state();
+    return true;
 }
