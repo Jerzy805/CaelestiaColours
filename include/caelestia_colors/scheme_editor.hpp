@@ -61,21 +61,4 @@ class SchemeEditor
         original = Scheme::from_file(path);
         current = original;
     }
-
-    static fs::path get_caelestia_scheme_path()
-    {
-        if (const char* state_home = std::getenv("XDG_STATE_HOME");
-            state_home != nullptr)
-        {
-            return fs::path(state_home) / "caelestia/scheme.json";
-        }
-
-        if (const char* home = std::getenv("HOME");
-            home != nullptr)
-        {
-            return fs::path(home) / ".local/state/caelestia/scheme.json";
-        }
-
-        throw std::runtime_error("Unable to determine user state directory");
-    }
 };

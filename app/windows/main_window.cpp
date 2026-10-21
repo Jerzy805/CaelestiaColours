@@ -19,7 +19,7 @@
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 {
-    m_scheme_editor = SchemeEditor::from_file(SchemeEditor::get_caelestia_scheme_path());
+    m_scheme_editor = SchemeEditor::from_file(SchemePaths::caelestia_scheme());
 
     auto updateModifiedState = [this]()
     {
@@ -84,17 +84,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     auto* schemesTitle = new QLabel("YOUR SCHEMES");
     schemesTitle->setObjectName("sectionTitle");
 
-    auto* schemeList = new QListWidget;
-    schemeList->setObjectName("schemeList");
-    schemeList->addItems({
-        "Catppuccin",
-        "Nord",
-        "Gruvbox",
-        "Tokyo Night"
-    });
-    schemeList->setCurrentRow(0);
+    m_scheme_list = new QListWidget;
+    m_scheme_list->setObjectName("schemeList");
 
-    
+    populate_scheme_list();
 
     auto* saveButton = new QPushButton("Save");
     saveButton->setObjectName("secondaryButton");
@@ -106,7 +99,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     });
 
     sidebarLayout->addWidget(schemesTitle);
-    sidebarLayout->addWidget(schemeList, 1);
+    sidebarLayout->addWidget(m_scheme_list, 1);
     sidebarLayout->addWidget(saveButton);
 
     // Palette preview
@@ -656,4 +649,34 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
             border-color: #2b2d38;
         }
     )");
+}
+
+void MainWindow::populate_scheme_list()
+{
+    const auto directory = SchemePaths::schemes_directory();
+
+    fs::create_directories(directory);
+
+    m_scheme_list->clear();
+
+    for (const auto& entry : fs::directory_iterator(directory))
+    {
+        if (!entry.is_regular_file() || entry.path().extension() != ".json")
+        {
+            continue;
+        }
+
+        const auto path = entry.path();
+
+        auto* item = new QListWidgetItem(
+            QString::fromStdString(path.stem().string()),
+            m_scheme_list
+        );
+
+        // store the file path independently of the displayed name
+        item->setData(
+            Qt::UserRole,
+            QString::fromStdString(path.string())
+        );
+    }
 }
