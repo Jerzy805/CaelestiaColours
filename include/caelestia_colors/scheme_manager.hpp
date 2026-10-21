@@ -4,8 +4,29 @@
 
 namespace fs = std::filesystem;
 
-struct SchemeManager
+class SchemeManager
 {
+    static void refresh_theme()
+    {
+        // load the active scheme and apply its colours without regeneration
+        constexpr const char* command =
+            "python -c '"
+            "from caelestia.utils.scheme import get_scheme; "
+            "from caelestia.utils.theme import apply_colours; "
+            "s = get_scheme(); "
+            "apply_colours(s.colours, s.mode)"
+            "'";
+
+        // execute the Caelestia theme update
+        const int result = std::system(command);
+
+        if (result != 0)
+        {
+            throw std::runtime_error("Failed to refresh Caelestia theme");
+        }
+    }
+
+    public:
     SchemeManager() = delete;
 
     /**
@@ -20,43 +41,63 @@ struct SchemeManager
      * This allows the previous active scheme to be restored if needed.
     */
     static void apply_scheme(const fs::path& scheme_path)
-    {   
-        const auto active_scheme = SchemePaths::caelestia_scheme();
-        const auto backup_scheme = SchemePaths::backups_directory()/"previous.json";
-        const auto temporary_scheme = active_scheme.string() + ".tmp";
+    {
+        const fs::path active_scheme = SchemePaths::caelestia_scheme();
+        const fs::path backup_scheme =
+            SchemePaths::backups_directory() / "previous.json";
 
+        // temporary files are created in the same directories
+        // as their final destinations
+        const fs::path temporary_scheme =
+            active_scheme.string() + ".tmp";
+
+        const fs::path temporary_backup =
+            backup_scheme.string() + ".tmp";
+
+        // make sure the backup directory exists
         fs::create_directories(SchemePaths::backups_directory());
-
-        // making the temporary file from scheme_path
-        auto temporary_created = fs::copy_file(scheme_path, temporary_scheme,
-            fs::copy_options::overwrite_existing);
-
-        if (!temporary_created)
-        {
-            throw std::runtime_error("Applying scheme failed");
-            // original file wasn't , so the rollback isn't a thing here
-        }
-
-        // making sure current scheme is saved and possible to recover
-        auto backup_created = fs::copy_file(SchemePaths::caelestia_scheme(),
-            SchemePaths::backups_directory()/"previous.json", fs::copy_options::overwrite_existing);
-
-        if (!backup_created)
-        {
-            fs::remove(temporary_scheme);
-            throw std::runtime_error("Making the backup of current scheme failed");
-        }        
 
         try
         {
+            // prepare the new scheme without modifying the active one
+            // if copying fails, the active scheme remains unchanged
+            fs::copy_file(
+                scheme_path,
+                temporary_scheme,
+                fs::copy_options::overwrite_existing
+            );
+
+            // prepare a backup of the currently active scheme
+            // the existing previous.json is not overwritten yet
+            fs::copy_file(
+                active_scheme,
+                temporary_backup,
+                fs::copy_options::overwrite_existing
+            );
+
+            // replace the previous backup with the prepared backup
+            fs::rename(temporary_backup, backup_scheme);
+
+            // atomically replace the active scheme with the new one
+            // both files are in the same directory
             fs::rename(temporary_scheme, active_scheme);
         }
-        catch(...)
+        catch (...)
         {
-            std::error_code error;
-            fs::remove(temporary_scheme, error);
+            // cleanup must not throw another exception while
+            // the original exception is being handled
+            std::error_code ec;
+
+            fs::remove(temporary_scheme, ec);
+
+            ec.clear();
+            fs::remove(temporary_backup, ec);
+
+            // propagate the original exception to the caller
             throw;
         }
+
+        refresh_theme();
     }
 
     /**
@@ -69,32 +110,39 @@ struct SchemeManager
     */
     static void restore_previous()
     {
-        const auto backup_scheme = SchemePaths::backups_directory()/"previous.json";
+        const fs::path backup_scheme =
+            SchemePaths::backups_directory() / "previous.json";
 
+        const fs::path active_scheme = SchemePaths::caelestia_scheme();
+        const fs::path temporary_scheme = active_scheme.string() + ".tmp";
+
+        // check whether a previous scheme is available
         if (!fs::exists(backup_scheme))
         {
             throw std::runtime_error("There's no backup scheme");
         }
 
-        const auto active_scheme = SchemePaths::caelestia_scheme();
-        const auto temporary_scheme = active_scheme.string() + ".tmp";
-
-        auto temporary_created = fs::copy_file(backup_scheme, temporary_scheme, fs::copy_options::overwrite_existing);
-
-        if (!temporary_created)
-        {
-            throw std::runtime_error("Creating the temporary file failed");
-        }
-
         try
         {
+            // prepare the previous scheme without modifying the active one
+            fs::copy_file(
+                backup_scheme,
+                temporary_scheme,
+                fs::copy_options::overwrite_existing
+            );
+
+            // replace the active scheme with the prepared backup
             fs::rename(temporary_scheme, active_scheme);
         }
-        catch(...)
+        catch (...)
         {
-            std::error_code error;
-            fs::remove(temporary_scheme, error);
+            // remove the temporary file without masking the original exception
+            std::error_code ec;
+            fs::remove(temporary_scheme, ec);
+
             throw;
         }
+
+        refresh_theme();
     }
 };
