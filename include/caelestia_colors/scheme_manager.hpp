@@ -6,7 +6,7 @@ namespace fs = std::filesystem;
 
 struct SchemeManager
 {
-    SchemeManager() {}
+    // SchemeManager() {}
 
     /**
      * Applies a scheme as Caelestia's active scheme.
@@ -19,7 +19,7 @@ struct SchemeManager
      *
      * This allows the previous active scheme to be restored if needed.
     */
-    void apply_scheme(const fs::path& scheme_path)
+    static void apply_scheme(const fs::path& scheme_path)
     {   
         const auto active_scheme = SchemePaths::caelestia_scheme();
         const auto backup_scheme = SchemePaths::backups_directory()/"previous.json";
@@ -67,7 +67,7 @@ struct SchemeManager
      * untouched if preparing the restore fails. Once the temporary file is
      * ready, it replaces Caelestia's active scheme.
     */
-    void restore_previous()
+    static void restore_previous()
     {
         const auto backup_scheme = SchemePaths::backups_directory()/"previous.json";
 
