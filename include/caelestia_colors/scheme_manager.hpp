@@ -1,5 +1,6 @@
 #pragma once
 
+#include "scheme.hpp"
 #include "scheme_paths.hpp"
 
 namespace fs = std::filesystem;
@@ -110,36 +111,56 @@ class SchemeManager
     */
     static void restore_previous()
     {
+        const fs::path active_scheme = SchemePaths::caelestia_scheme();
         const fs::path backup_scheme =
             SchemePaths::backups_directory() / "previous.json";
 
-        const fs::path active_scheme = SchemePaths::caelestia_scheme();
-        const fs::path temporary_scheme = active_scheme.string() + ".tmp";
-
-        // check whether a previous scheme is available
         if (!fs::exists(backup_scheme))
         {
-            throw std::runtime_error("There's no backup scheme");
+            throw std::runtime_error("There's no previous scheme");
         }
+
+        if (!fs::exists(active_scheme))
+        {
+            throw std::runtime_error("Active scheme does not exist");
+        }
+
+        // prepare the temporary file in the same directory as the active scheme
+        const fs::path temporary_scheme =
+            active_scheme.string() + ".tmp";
+
+        // validate both schemes before modifying anything
+        Scheme::from_file(active_scheme);
+        Scheme::from_file(backup_scheme);
+
+        // copy the previous scheme to a temporary file
+        fs::copy_file(
+            backup_scheme,
+            temporary_scheme,
+            fs::copy_options::overwrite_existing
+        );
 
         try
         {
-            // prepare the previous scheme without modifying the active one
-            fs::copy_file(
-                backup_scheme,
-                temporary_scheme,
-                fs::copy_options::overwrite_existing
-            );
+            // replace previous.json with the current active scheme
+            fs::rename(active_scheme, backup_scheme);
 
-            // replace the active scheme with the prepared backup
-            fs::rename(temporary_scheme, active_scheme);
+            try
+            {
+                // activate the previously backed-up scheme
+                fs::rename(temporary_scheme, active_scheme);
+            }
+            catch (...)
+            {
+                // restore the original active scheme if the second rename fails
+                fs::rename(backup_scheme, active_scheme);
+                throw;
+            }
         }
         catch (...)
         {
-            // remove the temporary file without masking the original exception
             std::error_code ec;
             fs::remove(temporary_scheme, ec);
-
             throw;
         }
 

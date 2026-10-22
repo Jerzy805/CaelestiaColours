@@ -5,6 +5,7 @@
 #include <fstream>
 #include <string>
 #include <stdexcept>
+#include <utility>
 
 namespace fs = std::filesystem;
 
@@ -16,22 +17,22 @@ class Scheme
     std::string variant;
     Flavour colour_data; // now here are stored key-value elements, depends on the implementation of Flavour, now eg. background-#FF0000
 
-
     public:
 
-    const std::string& get_name() const { return name; }
     const std::string& get_flavour() const { return flavour; }
     const std::string& get_mode() const { return mode; }
     const std::string& get_variant() const { return variant; }
+    Flavour& get_colour_data() { return colour_data; }
+    const Flavour& get_colour_data() const { return colour_data; }
 
-    Flavour& get_colour_data()
+    const std::string& get_name() const
     {
-        return colour_data;
+        return name;
     }
 
-    const Flavour& get_colour_data() const
+    void set_name(const std::string& new_name)
     {
-        return colour_data;
+        name = std::move(new_name);
     }
 
     nl::json to_json() const
