@@ -3,5 +3,6 @@ Type=Application
 Name=CaelestiaColours
 Comment=Colour scheme editor for Caelestia Shell
 Exec=caelestia_colours
+Icon=caelestia-colours
 Terminal=false
 Categories=Settings;

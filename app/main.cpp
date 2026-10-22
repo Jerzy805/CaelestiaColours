@@ -6,6 +6,7 @@
 #include <QStyleOption>
 #include <QPainter>
 #include <QPen>
+#include <QIcon>
 
 #include "windows/main_window.hpp"
 
@@ -128,6 +129,8 @@ void setupApplicationTheme(QApplication& app)
 int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
+
+    app.setWindowIcon(QIcon::fromTheme("caelestia-colours"));
 
     setupApplicationTheme(app);
 

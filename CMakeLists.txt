@@ -57,6 +57,13 @@ install(
     DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
 )
 
+# Install application icon
+install(
+    FILES assets/caelestia-colours-512.png
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/512x512/apps
+    RENAME caelestia-colours.png
+)
+
 # Backend tests
 if(BUILD_TESTING)
     add_executable(scheme_editor_test
