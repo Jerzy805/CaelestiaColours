@@ -27,6 +27,7 @@ private:
     bool update_card_colour(ClickableFrame* card, const QString& value);
     void update_inspector();
     void update_modified_state();
+    void create_scheme();
 
     std::optional<SchemeEditor> m_scheme_editor;
     QListWidget* m_scheme_list{nullptr};
