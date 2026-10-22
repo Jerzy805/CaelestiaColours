@@ -8,6 +8,16 @@ Instead of manually editing JSON files, you can customise individual colours and
 
 **Current version:** v0.1.0
 
+## Screenshots
+
+### Main window
+
+![CaelestiaColours main window](screenshots/MainWindow.jpeg)
+
+### Colour picker
+
+![Editing a colour in CaelestiaColours](screenshots/ColourPicker.jpeg)
+
 ## Features
 
 - **Visual colour editor** — browse and edit individual colours using an interactive palette.
