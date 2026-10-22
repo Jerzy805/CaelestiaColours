@@ -1,12 +1,87 @@
 #include <QApplication>
 #include <QPalette>
 #include <QColor>
+#include <QProxyStyle>
+#include <QStyle>
+#include <QStyleOption>
+#include <QPainter>
+#include <QPen>
 
 #include "windows/main_window.hpp"
 
+class CaelestiaStyle : public QProxyStyle
+{
+public:
+    using QProxyStyle::QProxyStyle;
+
+    int styleHint(
+        StyleHint hint,
+        const QStyleOption* option = nullptr,
+        const QWidget* widget = nullptr,
+        QStyleHintReturn* returnData = nullptr
+    ) const override
+    {
+        // keep dialog buttons text-only, but preserve Qt keyboard mnemonics
+        if (hint == QStyle::SH_DialogButtonBox_ButtonsHaveIcons)
+            return 0;
+
+        return QProxyStyle::styleHint(hint, option, widget, returnData);
+    }
+
+    void drawPrimitive(
+        PrimitiveElement element,
+        const QStyleOption* option,
+        QPainter* painter,
+        const QWidget* widget = nullptr
+    ) const override
+    {
+        if (option && (element == QStyle::PE_IndicatorSpinUp ||
+                       element == QStyle::PE_IndicatorSpinDown))
+        {
+            // draw high-contrast spinbox arrows on dark backgrounds
+            painter->save();
+            painter->setRenderHint(QPainter::Antialiasing);
+            painter->setPen(QPen(
+                option->state & QStyle::State_Enabled
+                    ? QColor("#E8EAF0")
+                    : QColor("#777B8A"),
+                1.6,
+                Qt::SolidLine,
+                Qt::RoundCap,
+                Qt::RoundJoin
+            ));
+            painter->setBrush(Qt::NoBrush);
+
+            const QPointF c = option->rect.center();
+            const qreal halfWidth = 3.0;
+            const qreal halfHeight = 1.8;
+
+            QPolygonF arrow;
+            if (element == QStyle::PE_IndicatorSpinUp)
+            {
+                arrow << QPointF(c.x() - halfWidth, c.y() + halfHeight)
+                      << QPointF(c.x(), c.y() - halfHeight)
+                      << QPointF(c.x() + halfWidth, c.y() + halfHeight);
+            }
+            else
+            {
+                arrow << QPointF(c.x() - halfWidth, c.y() - halfHeight)
+                      << QPointF(c.x(), c.y() + halfHeight)
+                      << QPointF(c.x() + halfWidth, c.y() - halfHeight);
+            }
+
+            painter->drawPolyline(arrow);
+            painter->restore();
+            return;
+        }
+
+        QProxyStyle::drawPrimitive(element, option, painter, widget);
+    }
+};
+
 void setupApplicationTheme(QApplication& app)
 {
-    app.setStyle("Fusion");
+    app.setStyle(new CaelestiaStyle("Fusion"));
 
     QPalette palette;
     palette.setColor(QPalette::Window, QColor("#171923"));

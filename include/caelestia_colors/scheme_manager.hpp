@@ -3,13 +3,18 @@
 #include "scheme.hpp"
 #include "scheme_paths.hpp"
 
+#include <cstdlib>
+#include <filesystem>
+#include <stdexcept>
+#include <string>
+#include <system_error>
+
 namespace fs = std::filesystem;
 
 class SchemeManager
 {
     static void refresh_theme()
     {
-        // load the active scheme and apply its colours without regeneration
         constexpr const char* command =
             "python -c '"
             "from caelestia.utils.scheme import get_scheme; "
@@ -18,152 +23,124 @@ class SchemeManager
             "apply_colours(s.colours, s.mode)"
             "'";
 
-        // execute the Caelestia theme update
-        const int result = std::system(command);
-
-        if (result != 0)
+        if (std::system(command) != 0)
         {
-            throw std::runtime_error("Failed to refresh Caelestia theme");
+            throw std::runtime_error(
+                "Scheme files were updated, but Caelestia theme refresh failed");
         }
     }
 
-    public:
+    static void remove_noexcept(const fs::path& path) noexcept
+    {
+        std::error_code ec;
+        fs::remove(path, ec);
+    }
+
+    static void validate_scheme(const fs::path& path)
+    {
+        (void)Scheme::from_file(path);
+    }
+
+public:
     SchemeManager() = delete;
 
-    /**
-     * Applies a scheme as Caelestia's active scheme.
-     *
-     * The new scheme is first copied to a temporary file so that the
-     * currently active scheme remains untouched if preparing the new
-     * scheme fails. Once the temporary file is ready, the current active
-     * scheme is backed up as "previous.json". Finally, the temporary file
-     * replaces Caelestia's active scheme.
-     *
-     * This allows the previous active scheme to be restored if needed.
-    */
     static void apply_scheme(const fs::path& scheme_path)
     {
-        const fs::path active_scheme = SchemePaths::caelestia_scheme();
-        const fs::path backup_scheme =
+        const fs::path active = SchemePaths::caelestia_scheme();
+        const fs::path previous =
             SchemePaths::backups_directory() / "previous.json";
+        const fs::path next_active = active.string() + ".apply.tmp";
+        const fs::path next_previous = previous.string() + ".apply.tmp";
 
-        // temporary files are created in the same directories
-        // as their final destinations
-        const fs::path temporary_scheme =
-            active_scheme.string() + ".tmp";
+        if (fs::equivalent(scheme_path, active))
+            throw std::runtime_error("Cannot apply the active scheme to itself");
 
-        const fs::path temporary_backup =
-            backup_scheme.string() + ".tmp";
+        validate_scheme(scheme_path);
+        validate_scheme(active);
+        fs::create_directories(previous.parent_path());
 
-        // make sure the backup directory exists
-        fs::create_directories(SchemePaths::backups_directory());
-
+        // Staging files must not be shared with another running instance.
         try
         {
-            // prepare the new scheme without modifying the active one
-            // if copying fails, the active scheme remains unchanged
-            fs::copy_file(
-                scheme_path,
-                temporary_scheme,
-                fs::copy_options::overwrite_existing
-            );
+            fs::copy_file(scheme_path, next_active,
+                          fs::copy_options::overwrite_existing);
+            fs::copy_file(active, next_previous,
+                          fs::copy_options::overwrite_existing);
 
-            // prepare a backup of the currently active scheme
-            // the existing previous.json is not overwritten yet
-            fs::copy_file(
-                active_scheme,
-                temporary_backup,
-                fs::copy_options::overwrite_existing
-            );
-
-            // replace the previous backup with the prepared backup
-            fs::rename(temporary_backup, backup_scheme);
-
-            // atomically replace the active scheme with the new one
-            // both files are in the same directory
-            fs::rename(temporary_scheme, active_scheme);
+            // Publish the backup first: the current active scheme is still intact.
+            fs::rename(next_previous, previous);
+            fs::rename(next_active, active);
         }
         catch (...)
         {
-            // cleanup must not throw another exception while
-            // the original exception is being handled
-            std::error_code ec;
-
-            fs::remove(temporary_scheme, ec);
-
-            ec.clear();
-            fs::remove(temporary_backup, ec);
-
-            // propagate the original exception to the caller
+            remove_noexcept(next_active);
+            remove_noexcept(next_previous);
             throw;
         }
 
         refresh_theme();
     }
 
-    /**
-     * Restores the scheme that was active before the last scheme was applied.
-     *
-     * The previous active scheme is stored as "previous.json". It is first
-     * copied to a temporary file so that the current active scheme remains
-     * untouched if preparing the restore fails. Once the temporary file is
-     * ready, it replaces Caelestia's active scheme.
-    */
     static void restore_previous()
     {
-        const fs::path active_scheme = SchemePaths::caelestia_scheme();
-        const fs::path backup_scheme =
+        const fs::path active = SchemePaths::caelestia_scheme();
+        const fs::path previous =
             SchemePaths::backups_directory() / "previous.json";
+        const fs::path next_active = active.string() + ".restore.tmp";
+        const fs::path next_previous = previous.string() + ".restore.tmp";
+        const fs::path old_previous = previous.string() + ".restore.rollback.tmp";
 
-        if (!fs::exists(backup_scheme))
-        {
+        if (!fs::exists(previous))
             throw std::runtime_error("There's no previous scheme");
-        }
 
-        if (!fs::exists(active_scheme))
-        {
-            throw std::runtime_error("Active scheme does not exist");
-        }
-
-        // prepare the temporary file in the same directory as the active scheme
-        const fs::path temporary_scheme =
-            active_scheme.string() + ".tmp";
-
-        // validate both schemes before modifying anything
-        Scheme::from_file(active_scheme);
-        Scheme::from_file(backup_scheme);
-
-        // copy the previous scheme to a temporary file
-        fs::copy_file(
-            backup_scheme,
-            temporary_scheme,
-            fs::copy_options::overwrite_existing
-        );
+        validate_scheme(active);
+        validate_scheme(previous);
 
         try
         {
-            // replace previous.json with the current active scheme
-            fs::rename(active_scheme, backup_scheme);
+            // Prepare both new versions without touching the originals.
+            fs::copy_file(previous, next_active,
+                          fs::copy_options::overwrite_existing);
+            fs::copy_file(active, next_previous,
+                          fs::copy_options::overwrite_existing);
+            fs::copy_file(previous, old_previous,
+                          fs::copy_options::overwrite_existing);
+
+            // First replace the backup; active remains readable throughout.
+            fs::rename(next_previous, previous);
 
             try
             {
-                // activate the previously backed-up scheme
-                fs::rename(temporary_scheme, active_scheme);
+                // Publish the previously backed-up scheme as active.
+                fs::rename(next_active, active);
             }
             catch (...)
             {
-                // restore the original active scheme if the second rename fails
-                fs::rename(backup_scheme, active_scheme);
+                // Restore the old backup if publishing the active file failed.
+                try
+                {
+                    fs::rename(old_previous, previous);
+                }
+                catch (...)
+                {
+                    // Preserve rollback data on disk for manual recovery.
+                    remove_noexcept(next_active);
+                    throw std::runtime_error(
+                        "Restore failed; previous.json may have changed. "
+                        "Original backup is in: " + old_previous.string());
+                }
                 throw;
             }
         }
         catch (...)
         {
-            std::error_code ec;
-            fs::remove(temporary_scheme, ec);
+            remove_noexcept(next_active);
+            remove_noexcept(next_previous);
+            // Keep old_previous if rollback itself failed.
             throw;
         }
 
+        remove_noexcept(old_previous);
         refresh_theme();
     }
 };

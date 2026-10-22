@@ -50,19 +50,46 @@ class Scheme
 
     void save_to_file(const fs::path& path) const
     {
-        std::ofstream file(path);
+        // create a temporary file in the same directory
+        const fs::path temporary_path = path.string() + ".tmp";
 
-        if (!file)
+        try
         {
-            throw std::runtime_error("Failed to open output file");
+            {
+                std::ofstream file(temporary_path, std::ios::binary | std::ios::trunc);
+
+                if (!file)
+                {
+                    throw std::runtime_error("Failed to open temporary file");
+                }
+
+                file << to_json().dump(4);
+
+                file.flush();
+
+                if (!file)
+                {
+                    throw std::runtime_error("Failed to write scheme data");
+                }
+
+                file.close();
+
+                if (!file)
+                {
+                    throw std::runtime_error("Failed to close temporary file");
+                }
+            }
+
+            // replace the destination only after successful writing
+            fs::rename(temporary_path, path);
         }
-
-        file << to_json().dump(4);
-        file.flush(); // just to make sure our stream checking makes sense
-
-        if (!file) // checking if stream is correct after saving data
+        catch (...)
         {
-            throw std::runtime_error("Failed to save data");
+            // remove incomplete temporary file
+            std::error_code ec;
+            fs::remove(temporary_path, ec);
+
+            throw;
         }
     }
 

@@ -1,5 +1,6 @@
 #include "windows/main_window.hpp"
 #include "widgets/clickable_frame.hpp"
+#include <caelestia_colors/scheme_manager.hpp>
 
 #include <QColor>
 #include <QColorDialog>
@@ -17,6 +18,7 @@
 #include <QSignalBlocker>
 #include <QInputDialog>
 #include <QRegularExpression>
+#include <QListWidgetItem>
 
 #include <exception>
 #include <utility>
@@ -58,9 +60,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     auto* newSchemeButton = new QPushButton("+  New scheme");
     newSchemeButton->setObjectName("primaryButton");
     newSchemeButton->setCursor(Qt::PointingHandCursor);
-
-    connect(newSchemeButton, &QPushButton::clicked,
-        this, &MainWindow::create_scheme);
+    connect(newSchemeButton, &QPushButton::clicked, this, &MainWindow::create_scheme);
 
     header->addLayout(titleGroup);
     header->addStretch();
@@ -87,8 +87,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 
     m_scheme_list = new QListWidget;
     m_scheme_list->setObjectName("schemeList");
-    populate_scheme_list();
-    m_scheme_list->setCurrentRow(0);
+
 
     connect(m_scheme_list, &QListWidget::itemClicked, this,
             [this](QListWidgetItem* item)
@@ -99,6 +98,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 
     auto* saveButton = new QPushButton("Save");
     saveButton->setObjectName("secondaryButton");
+    saveButton->setCursor(Qt::PointingHandCursor);
 
     connect(saveButton, &QPushButton::clicked, this, [this]
     {
@@ -116,6 +116,20 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     sidebarLayout->addWidget(schemesTitle);
     sidebarLayout->addWidget(m_scheme_list, 1);
     sidebarLayout->addWidget(saveButton);
+
+    m_apply_button = new QPushButton("Apply scheme");
+    m_restore_button = new QPushButton("Restore previous");
+    m_delete_button = new QPushButton("Delete scheme");
+    for (auto* button : {m_apply_button, m_restore_button, m_delete_button})
+    {
+        button->setObjectName("secondaryButton");
+        button->setCursor(Qt::PointingHandCursor);
+        sidebarLayout->addWidget(button);
+    }
+    m_delete_button->setObjectName("dangerButton");
+    connect(m_apply_button, &QPushButton::clicked, this, &MainWindow::apply_current_scheme);
+    connect(m_restore_button, &QPushButton::clicked, this, &MainWindow::restore_previous_scheme);
+    connect(m_delete_button, &QPushButton::clicked, this, &MainWindow::delete_current_scheme);
 
     // Palette preview
     auto* editor = new QFrame;
@@ -479,7 +493,20 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
             color: #6f6c79;
             border-color: #2b2d38;
         }
+        QPushButton#dangerButton {
+            background-color: #35242c;
+            color: #ffb4c2;
+            border: 1px solid #754354;
+            border-radius: 10px;
+            padding: 10px 16px;
+        }
+        QPushButton#dangerButton:hover { background-color: #50303b; }
+        QPushButton#dangerButton:disabled { background-color: #20222b; color: #6f6c79; border-color: #2b2d38; }
     )");
+    
+    populate_scheme_list();
+    m_scheme_list->setCurrentRow(0);
+
     rebuild_colour_cards();
     update_modified_state();
 }
@@ -489,56 +516,76 @@ void MainWindow::update_modified_state()
     if (m_app_title && m_scheme_editor)
         m_app_title->setText(m_scheme_editor->is_modified()
             ? "CaelestiaColours*" : "CaelestiaColours");
+    update_action_buttons();
 }
 
 void MainWindow::populate_scheme_list()
 {
     try
     {
-        const auto directory = SchemePaths::schemes_directory();
+        const fs::path directory = SchemePaths::schemes_directory();
         fs::create_directories(directory);
-
+        QSignalBlocker blocker(m_scheme_list);
         m_scheme_list->clear();
 
-        // active Caelestia scheme
-        const auto activePath = SchemePaths::caelestia_scheme();
+        const fs::path active = SchemePaths::caelestia_scheme();
+        auto* activeItem = new QListWidgetItem("● Active Caelestia scheme", m_scheme_list);
+        activeItem->setData(Qt::UserRole, QString::fromStdString(active.string()));
 
-        auto* activeItem = new QListWidgetItem(
-            "● Active Caelestia scheme", m_scheme_list);
-
-        activeItem->setData(
-            Qt::UserRole,
-            QString::fromStdString(activePath.string())
-        );
-
-        // user-created schemes
         for (const auto& entry : fs::directory_iterator(directory))
         {
-            if (!entry.is_regular_file() ||
-                entry.path().extension() != ".json")
+            if (!entry.is_regular_file() || entry.path().extension() != ".json")
                 continue;
-
             const auto path = entry.path();
-
             auto* item = new QListWidgetItem(
-                QString::fromStdString(path.stem().string()),
-                m_scheme_list
-            );
-
-            item->setData(
-                Qt::UserRole,
-                QString::fromStdString(path.string())
-            );
+                QString::fromStdString(path.stem().string()), m_scheme_list);
+            item->setData(Qt::UserRole, QString::fromStdString(path.string()));
         }
+        select_current_scheme_in_list();
     }
     catch (const std::exception& e)
     {
-        QMessageBox::warning(
-            this,
-            "Failed to list schemes",
-            QString::fromUtf8(e.what())
-        );
+        QMessageBox::warning(this, "Failed to list schemes", QString::fromUtf8(e.what()));
     }
+    update_action_buttons();
+}
+
+void MainWindow::select_current_scheme_in_list()
+{
+    if (!m_scheme_editor || !m_scheme_list)
+        return;
+    const auto current = m_scheme_editor->get_path().lexically_normal();
+    QSignalBlocker blocker(m_scheme_list);
+    for (int i = 0; i < m_scheme_list->count(); ++i)
+    {
+        auto* item = m_scheme_list->item(i);
+        const auto path = fs::path(item->data(Qt::UserRole).toString().toStdString());
+        if (path.lexically_normal() == current)
+        {
+            m_scheme_list->setCurrentItem(item);
+            return;
+        }
+    }
+    m_scheme_list->clearSelection();
+}
+
+bool MainWindow::is_editing_active_scheme() const
+{
+    return m_scheme_editor &&
+        m_scheme_editor->get_path().lexically_normal() ==
+        SchemePaths::caelestia_scheme().lexically_normal();
+}
+
+void MainWindow::update_action_buttons()
+{
+    if (!m_apply_button)
+        return;
+    const bool userScheme = m_scheme_editor && !is_editing_active_scheme();
+    m_apply_button->setEnabled(userScheme);
+    m_delete_button->setEnabled(userScheme);
+    std::error_code ec;
+    const auto backup = SchemePaths::backups_directory() / "previous.json";
+    m_restore_button->setEnabled(fs::is_regular_file(backup, ec));
 }
 
 void MainWindow::load_scheme(const fs::path& path)
@@ -549,9 +596,11 @@ void MainWindow::load_scheme(const fs::path& path)
             this, "Unsaved changes",
             "Discard unsaved changes and open another scheme?",
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-
         if (answer != QMessageBox::Yes)
+        {
+            select_current_scheme_in_list();
             return;
+        }
     }
 
     try
@@ -560,10 +609,177 @@ void MainWindow::load_scheme(const fs::path& path)
         m_scheme_editor = std::move(editor);
         rebuild_colour_cards();
         update_modified_state();
+        select_current_scheme_in_list();
     }
     catch (const std::exception& e)
     {
+        select_current_scheme_in_list();
         QMessageBox::warning(this, "Failed to load scheme", QString::fromUtf8(e.what()));
+    }
+}
+
+void MainWindow::create_scheme()
+{
+    if (!m_scheme_editor)
+        return;
+
+    QInputDialog dialog(this);
+    dialog.setWindowTitle("New scheme");
+    dialog.setLabelText("Scheme name:");
+    dialog.setInputMode(QInputDialog::TextInput);
+    dialog.setStyleSheet(R"(
+        QDialog { background-color: #191b22; color: #e2e0ec; }
+        QLabel { color: #e2e0ec; }
+        QLineEdit { background: #252630; color: #f1eaff; border: 1px solid #45475a; border-radius: 7px; padding: 8px; min-width: 260px; }
+        QPushButton { background: #30313d; color: #e2e0ec; border: 1px solid #45475a; border-radius: 7px; padding: 8px 16px; }
+        QPushButton:hover { background: #45475a; }
+    )");
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    const QString name = dialog.textValue().trimmed();
+    static const QRegularExpression validName(R"(^[A-Za-z0-9 _-]+$)");
+    if (name.isEmpty() || !validName.match(name).hasMatch())
+    {
+        QMessageBox::warning(this, "Invalid name", "Use letters, numbers, spaces, underscores or hyphens");
+        return;
+    }
+
+    try
+    {
+        const fs::path directory = SchemePaths::schemes_directory();
+        fs::create_directories(directory);
+        const fs::path path = directory / (name.toStdString() + ".json");
+        if (fs::exists(path))
+        {
+            QMessageBox::warning(this, "Scheme exists", "A scheme with this name already exists");
+            return;
+        }
+        Scheme scheme = m_scheme_editor->get_current();
+        scheme.set_name(name.toStdString());
+        scheme.save_to_file(path);
+        m_scheme_editor = SchemeEditor::from_file(path);
+        populate_scheme_list();
+        rebuild_colour_cards();
+        update_modified_state();
+    }
+    catch (const std::exception& e)
+    {
+        QMessageBox::warning(this, "Failed to create scheme", QString::fromUtf8(e.what()));
+    }
+}
+
+void MainWindow::apply_current_scheme()
+{
+    if (!m_scheme_editor || is_editing_active_scheme())
+        return;
+
+    try
+    {
+        if (m_scheme_editor->is_modified())
+        {
+            const auto answer = QMessageBox::question(
+                this, "Unsaved changes",
+                "Save your changes before applying this scheme?",
+                QMessageBox::Save | QMessageBox::Cancel, QMessageBox::Save);
+            if (answer != QMessageBox::Save)
+                return;
+            m_scheme_editor->save();
+            update_modified_state();
+        }
+
+        // validate the source before modifying Caelestia's active scheme
+        Scheme::from_file(m_scheme_editor->get_path());
+        SchemeManager::apply_scheme(m_scheme_editor->get_path());
+        QMessageBox::information(this, "Scheme applied", "The scheme is now active in Caelestia");
+        update_action_buttons();
+    }
+    catch (const std::exception& e)
+    {
+        QMessageBox::warning(this, "Failed to apply scheme",
+                             QString::fromUtf8(e.what()) +
+                             "\nThe active file may already have changed; check Caelestia before retrying");
+    }
+}
+
+void MainWindow::restore_previous_scheme()
+{
+    if (!m_scheme_editor)
+        return;
+    const bool editingActive = is_editing_active_scheme();
+    if (editingActive && m_scheme_editor->is_modified())
+    {
+        const auto answer = QMessageBox::question(
+            this, "Unsaved changes",
+            "Restoring will replace the active scheme and discard its unsaved edits. Continue?",
+            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+        if (answer != QMessageBox::Yes)
+            return;
+    }
+    try
+    {
+        SchemeManager::restore_previous();
+        if (editingActive)
+        {
+            m_scheme_editor = SchemeEditor::from_file(SchemePaths::caelestia_scheme());
+            rebuild_colour_cards();
+            update_modified_state();
+        }
+        select_current_scheme_in_list();
+        update_action_buttons();
+    }
+    catch (const std::exception& e)
+    {
+        // refresh may fail after the files were already exchanged
+        if (editingActive)
+        {
+            try
+            {
+                m_scheme_editor = SchemeEditor::from_file(SchemePaths::caelestia_scheme());
+                rebuild_colour_cards();
+                update_modified_state();
+            }
+            catch (...) {}
+        }
+        QMessageBox::warning(this, "Failed to restore scheme",
+                             QString::fromUtf8(e.what()) +
+                             "\nThe active file may already have changed");
+    }
+}
+
+void MainWindow::delete_current_scheme()
+{
+    if (!m_scheme_editor || is_editing_active_scheme())
+        return;
+    try
+    {
+        const auto path = m_scheme_editor->get_path();
+        const auto directory = fs::canonical(SchemePaths::schemes_directory());
+        const auto target = fs::canonical(path);
+        // only delete direct, regular, non-symlink JSON files in the managed directory
+        if (target.parent_path() != directory || target.extension() != ".json" ||
+            fs::is_symlink(fs::symlink_status(path)) || !fs::is_regular_file(path))
+        {
+            throw std::runtime_error("Cannot delete a file outside the user schemes directory");
+        }
+        const auto answer = QMessageBox::question(
+            this, "Delete scheme",
+            QString("Permanently delete '%1' and its JSON file?")
+                .arg(QString::fromStdString(path.stem().string())),
+            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+        if (answer != QMessageBox::Yes)
+            return;
+
+        if (!fs::remove(path))
+            throw std::runtime_error("The scheme file could not be deleted");
+        m_scheme_editor = SchemeEditor::from_file(SchemePaths::caelestia_scheme());
+        populate_scheme_list();
+        rebuild_colour_cards();
+        update_modified_state();
+    }
+    catch (const std::exception& e)
+    {
+        QMessageBox::warning(this, "Failed to delete scheme", QString::fromUtf8(e.what()));
     }
 }
 
@@ -706,117 +922,4 @@ bool MainWindow::update_card_colour(ClickableFrame* card, const QString& value)
     update_inspector();
     update_modified_state();
     return true;
-}
-
-void MainWindow::create_scheme()
-{
-    if (!m_scheme_editor)
-        return;
-
-    QInputDialog dialog(this);
-    dialog.setWindowTitle("New scheme");
-    dialog.setLabelText("Scheme name:");
-    dialog.setInputMode(QInputDialog::TextInput);
-    dialog.setTextValue("");
-
-    dialog.setStyleSheet(R"(
-        QDialog {
-            background-color: #171923;
-            color: #E8EAF0;
-        }
-
-        QLabel {
-            color: #E8EAF0;
-            font-size: 13px;
-        }
-
-        QLineEdit {
-            background-color: #252938;
-            color: #FFFFFF;
-            border: 1px solid #454B60;
-            border-radius: 7px;
-            padding: 8px;
-            min-width: 260px;
-        }
-
-        QPushButton {
-            background-color: #30364A;
-            color: #FFFFFF;
-            border: 1px solid #454B60;
-            border-radius: 7px;
-            padding: 7px 16px;
-        }
-
-        QPushButton:hover {
-            background-color: #454D68;
-        }
-    )");
-
-    if (dialog.exec() != QDialog::Accepted)
-        return;
-
-    const QString name = dialog.textValue().trimmed();
-
-    if (name.isEmpty())
-    {
-        QMessageBox::warning(this, "Invalid name", "Scheme name cannot be empty");
-        return;
-    }
-
-    // allow only safe filename characters
-    static const QRegularExpression validName(R"(^[A-Za-z0-9 _-]+$)");
-
-    if (!validName.match(name).hasMatch())
-    {
-        QMessageBox::warning(
-            this,
-            "Invalid name",
-            "Use only letters, numbers, spaces, underscores and hyphens"
-        );
-        return;
-    }
-
-    try
-    {
-        const auto directory = SchemePaths::schemes_directory();
-        fs::create_directories(directory);
-
-        const auto path = directory/(name.toStdString() + ".json"); 
-
-        if (fs::exists(path))
-        {
-            QMessageBox::warning(this, "Scheme already exists", "A scheme with this name already exists");
-            return;
-        }
-
-        // copy current scheme, including unsaved colour changes
-        auto scheme = m_scheme_editor->get_current();
-        scheme.set_name(name.toStdString());
-
-        scheme.save_to_file(path);
-
-        // switch editor to the newly created file
-        m_scheme_editor = SchemeEditor::from_file(path);
-
-        populate_scheme_list();
-
-        // select the new scheme in the sidebar
-        for (int i = 0; i < m_scheme_list->count(); i++)
-        {
-            auto* item = m_scheme_list->item(i);
-
-            if (item->data(Qt::UserRole).toString() == QString::fromStdString(path.string()))
-            {
-                m_scheme_list->setCurrentItem(item);
-                break;
-            }
-        }
-
-        rebuild_colour_cards();
-        update_modified_state();
-    }
-    catch(const std::exception& e)
-    {
-        QMessageBox::warning(this, "Failed to create scheme", QString::fromUtf8(e.what()));
-    }
 }
