@@ -96,12 +96,22 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         load_scheme(path);
     });
 
-    auto* saveButton = new QPushButton("Save");
-    saveButton->setObjectName("secondaryButton");
-    saveButton->setCursor(Qt::PointingHandCursor);
+    m_save_button = new QPushButton("Save");
+    m_save_button->setObjectName("secondaryButton");
+    m_save_button->setCursor(Qt::PointingHandCursor);
 
-    connect(saveButton, &QPushButton::clicked, this, [this]
+    connect(m_save_button, &QPushButton::clicked, this, [this]
     {
+        if (!m_scheme_editor)
+            return;
+
+        // active scheme is a template; never save directly to its file
+        if (is_editing_active_scheme())
+        {
+            create_scheme();
+            return;
+        }
+
         try
         {
             m_scheme_editor->save();
@@ -113,9 +123,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         }
     });
 
+    m_read_only_label = new QLabel("Read-only · Create a copy to save changes");
+    m_read_only_label->setObjectName("mutedText");
+    m_read_only_label->setWordWrap(true);
+    m_read_only_label->setVisible(false);
+
     sidebarLayout->addWidget(schemesTitle);
     sidebarLayout->addWidget(m_scheme_list, 1);
-    sidebarLayout->addWidget(saveButton);
+    sidebarLayout->addWidget(m_read_only_label);
+    sidebarLayout->addWidget(m_save_button);
 
     m_apply_button = new QPushButton("Apply scheme");
     m_restore_button = new QPushButton("Restore previous");
@@ -571,16 +587,29 @@ void MainWindow::select_current_scheme_in_list()
 
 bool MainWindow::is_editing_active_scheme() const
 {
-    return m_scheme_editor &&
-        m_scheme_editor->get_path().lexically_normal() ==
+    if (!m_scheme_editor)
+        return false;
+
+    std::error_code ec;
+    const bool sameFile = fs::equivalent(
+        m_scheme_editor->get_path(), SchemePaths::caelestia_scheme(), ec);
+    if (!ec)
+        return sameFile;
+
+    return m_scheme_editor->get_path().lexically_normal() ==
         SchemePaths::caelestia_scheme().lexically_normal();
 }
 
 void MainWindow::update_action_buttons()
 {
-    if (!m_apply_button)
+    if (!m_apply_button || !m_save_button || !m_read_only_label)
         return;
-    const bool userScheme = m_scheme_editor && !is_editing_active_scheme();
+    const bool hasScheme = m_scheme_editor.has_value();
+    const bool editingActive = is_editing_active_scheme();
+    const bool userScheme = hasScheme && !editingActive;
+    m_save_button->setEnabled(hasScheme);
+    m_save_button->setText(editingActive ? "Save as new scheme" : "Save");
+    m_read_only_label->setVisible(editingActive);
     m_apply_button->setEnabled(userScheme);
     m_delete_button->setEnabled(userScheme);
     std::error_code ec;

@@ -38,6 +38,7 @@ private:
 
     std::optional<SchemeEditor> m_scheme_editor;
     QListWidget* m_scheme_list{nullptr};
+    QPushButton* m_save_button{nullptr};
     QPushButton* m_apply_button{nullptr};
     QPushButton* m_restore_button{nullptr};
     QPushButton* m_delete_button{nullptr};
@@ -46,6 +47,7 @@ private:
     ClickableFrame* m_selectedCard{nullptr};
 
     QLabel* m_app_title{nullptr};
+    QLabel* m_read_only_label{nullptr};
     QLabel* m_selected_name{nullptr};
     QLineEdit* m_hex_value{nullptr};
     QFrame* m_selected_colour{nullptr};
