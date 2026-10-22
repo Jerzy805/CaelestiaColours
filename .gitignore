@@ -20,3 +20,6 @@ dane.json
 *.o
 *.out
 wynik
+
+# CMake build directories
+/build-*/

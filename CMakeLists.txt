@@ -12,15 +12,19 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+include(GNUInstallDirs)
+include(CTest)
+
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(nlohmann_json 3.11 REQUIRED)
 
 qt_standard_project_setup()
 
 # GUI application
 qt_add_executable(caelestia_colours
     app/main.cpp
-    app/windows/main_window.hpp
     app/windows/main_window.cpp
+    app/windows/main_window.hpp
     app/widgets/clickable_frame.hpp
 )
 
@@ -33,6 +37,7 @@ target_include_directories(caelestia_colours
 target_link_libraries(caelestia_colours
     PRIVATE
         Qt6::Widgets
+        nlohmann_json::nlohmann_json
 )
 
 target_compile_options(caelestia_colours
@@ -42,26 +47,41 @@ target_compile_options(caelestia_colours
         -Wpedantic
 )
 
+# Install executable
+install(TARGETS caelestia_colours
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(
+    FILES packaging/caelestia-colours.desktop
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
+)
+
 # Backend tests
-add_executable(scheme_editor_test
-    tests/scheme_editor_test.cpp
-)
+if(BUILD_TESTING)
+    add_executable(scheme_editor_test
+        tests/scheme_editor_test.cpp
+    )
 
-target_include_directories(scheme_editor_test
-    PRIVATE
-        ${PROJECT_SOURCE_DIR}/include
-)
+    target_include_directories(scheme_editor_test
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/include
+    )
 
-target_compile_options(scheme_editor_test
-    PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-)
+    target_link_libraries(scheme_editor_test
+        PRIVATE
+            nlohmann_json::nlohmann_json
+    )
 
-enable_testing()
+    target_compile_options(scheme_editor_test
+        PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+    )
 
-add_test(
-    NAME scheme_editor_test
-    COMMAND scheme_editor_test
-)
+    add_test(
+        NAME scheme_editor_test
+        COMMAND scheme_editor_test
+    )
+endif()
